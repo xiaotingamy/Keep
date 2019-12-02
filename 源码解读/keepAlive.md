@@ -191,4 +191,4 @@ function pruneCache (keepAliveInstance: any, filter: Function) {
 遍历`cache`缓存，`name`不符合`filter`条件的时候则调用`pruneCacheEntry`方法销毁`vnode`对应的组件实例（Vue实例），并从`cache`中移除。   
 
 ## 总结
-`keep-alive`组件是一个抽象组件，并且它的缓存是基于VNode节点的缓存，它的实现是通过自定义render函数并且利用了插槽。而且会随时监听include和exclude属性的变化做缓存数据的变化。
+`keep-alive`组件是一个抽象组件，并且它的缓存是基于VNode节点的缓存，它的实现是通过自定义render函数并且利用了插槽。而且会随时监听include和exclude属性的变化做缓存数据的变化。它将满足条件的组件在cache对象中缓存起来，在需要重新渲染的时候再将VNode节点从cache对象中取出并渲染。
