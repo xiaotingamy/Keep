@@ -74,10 +74,10 @@ String函数
 
 ### 对象属性类型
 
-1. 数据属性
+1. 数据属性（data property）
 configurable 被改为false后就不能再被改为true了。(一旦把属性定义为不可配置的，就不能再变回可配置的了)
 
-2. 访问器属性
+2. 存取器属性（accessor property）
 
 ### Object.create()
 
@@ -92,7 +92,7 @@ function inherit(p) {
     return Object.create(p)
   }
   var t = typeof p
-  if (t !== 'object' && t !== 'function') thorw TypeError()
+  if (t !== 'object' && t !== 'function') throw TypeError()
   function f() {}
   f.prototype = p
   return new f()
@@ -135,3 +135,88 @@ this.x = 1 // 创建一个可配置的全局属性（没有用var）
 delete x // 在非严格模式中删除全局对象的可配置属性时，可以省略对全局对象的引用，delete操作符后跟随要删除的属性名即可。（严格模式下会报语法错误）
 delete this.x // 严格模式下的写法
 ```
+
+### 检测属性
+
+判断某属性是否存在于对象中。
+
+* in运算符
+* hasOwnProperty()
+* propertyIsEnumerable()
+* 属性查询
+
+in运算符: 如果对象的自有属性或继承属性中包含这个属性值则返回true。
+
+```javascript
+var o = { x: 1 }
+var b = inherit(o)
+'x' in o // true
+'y' in o  // false
+'x' in b // true  b继承o的x属性
+```
+
+hasOwnProperty() 检测是否是对象的自有属性，对于继承属性它会返回false。
+
+```javascript
+var o = { x: 1 }
+var b = inherit(o)
+o.hasOwnProperty('x')  // true o中存在自有属性x
+o.hasOwnProperty('y')  // false o中不存在属性y
+b.hasOwnProperty('x')  // false x对于b来说是继承属性
+```
+
+propertyIsEnumerable() 是hasOwnProperty的升级版，检测到是自有属性且这个属性的可枚举性为true时它才返回true。
+
+```javascript
+var o = { x: 1 }
+var b = inherit(o)
+o.propertyIsEnumerable('x')  // true o中存在可枚举的自有属性x
+b.propertyIsEnumerable('x')  // false x对于b来说是继承属性
+Object.prototype.propertyIsEnumerable('toString') // false 内置属性toString是不可枚举的
+```
+
+属性查询
+
+```javascript
+// 如果o中含有属性x，则o.x乘以2
+if (o.x) {
+  o.x *= 2
+}
+```
+
+### 枚举属性
+
+遍历对象中的属性
+
+* for/in循环，遍历对象中所有可枚举的属性（包括自有属性和继承属性）
+
+为避免for/in循环中遍历出继承属性或者Object.prototype中添加的新的方法或属性，可用以下两种方式：
+
+```javascript
+for (p in o) {
+  if (!o.hasOwnProperty(p)) continue; // 跳过继承的属性
+}
+
+for (p in o) {
+  if (typeof o[p] === 'function') continue; // 跳过方法
+}
+```
+
+返回一个数组，这个数组包含的是o中可枚举的自有属性的名字
+
+```javascript
+function keys(o) {
+  if (typeof o !== 'object') throw TypeError()
+  var result = []
+  for (var prop in o) {
+    if (o.hasOwnProperty(prop)) {
+      result.push(prop)
+    }
+  }
+  return result
+}
+// 作用等同于Object.keys()
+```
+
+Object.keys()返回对象中`可枚举`的自有属性的名称组成的数组。
+Object.getOwnPropertyNames()返回对象中`所有`自有属性的名称(包括不可枚举和可枚举的属性)。
