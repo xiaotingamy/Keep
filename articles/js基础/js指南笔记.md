@@ -220,3 +220,49 @@ function keys(o) {
 
 Object.keys()返回对象中`可枚举`的自有属性的名称组成的数组。
 Object.getOwnPropertyNames()返回对象中`所有`自有属性的名称(包括不可枚举和可枚举的属性)。
+
+### 存取器属性
+
+getter和setter，举个🌰
+
+```javascript
+var p = {
+  x: 1.0,
+  y: 1.0,
+
+  // r是可读写的存取器属性，它有getter和setter
+  get r () {
+    return Math.sqrt(this.x*this.x+this.y*this.y)
+  },
+  set r (newvalue) {
+    var oldvalue = Math.sqrt(this.x*this.x+this.y*this.y)
+    var ratio = newvalue / oldvalue
+    this.x *= ratio
+    this.y *= ratio
+  },
+  // theta是只读存取器属性，它只有getter方法
+  get theta () {
+    return Math.atan2(this.y, this.x)
+  }
+}
+```
+
+存取器属性是可以继承的。
+
+```javascript
+var q = inherit(p)  // 创建一个继承getter和setter的新对象
+q.x = 1, q.y = 2;
+console.log(q.r) // 可使用继承的r属性
+console.log(q.theta)
+```
+
+### 属性的特性
+
+利用属性的特性的api
+
+1. 给原型对象添加方法，并设置为不可枚举的，看起来像内置方法。
+
+2. 给对象定义不能修改或删除的属性，“锁定”对象。
+
+数据属性的4个特性： value、writable、enumberable、configurable
+存储器属性的4个特性： get、set、enumberable、configurable
