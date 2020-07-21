@@ -266,3 +266,95 @@ console.log(q.theta)
 
 数据属性的4个特性： value、writable、enumberable、configurable
 存储器属性的4个特性： get、set、enumberable、configurable
+
+获得对象特定属性的属性描述符`Object.getOwnPropertyDescriptor()`，要注意的对于继承属性和不存在的属性返回undefined。
+
+```javascript
+Object.getOwnPropertyDescriptor({x:1}, 'x')
+// 返回 {value: 1, writable: true, enumberable: true, configurable: true}
+
+Object.getOwnPropertyDescriptor({}, 'x')
+// 返回undefined
+Object.getOwnPropertyDescriptor({}, 'toString')
+// 返回 undefined
+```
+
+设置属性特性或者新建属性具有某种特性：`Object.defineProperty()`
+
+```javascript
+var o = {}
+Object.defineProperty(o, 'x', {
+  value: 1,
+  writable: true,
+  enumberable: false,
+  configurable: true
+})
+o.x // 属性存在但不可枚举
+Object.keys(o) // []
+
+// 变成只读属性
+Object.defineProperty(o, 'x', {
+  writable: false
+})
+
+o.x = 2 // 操作失败但不报错，严格模式会报错
+
+o.x // =>1
+
+// 虽然只读，但属性依然是可配置的，所以可以通过这种方式对它进行修改
+Object.defineProperty(o, 'x', {
+  value: 2
+})
+
+o.x // =>2
+
+// 还能x从数据属性改为存取器属性
+Object.defineProperty(o, 'x', {
+  get: function() {
+    return o
+  }
+})
+```
+
+关于Object.defineProperty和Object.defineProperties的规则：
+
+* 如果对象是不可扩展的，则可以编辑已有的自有属性，但不能给他添加新属性。
+* 如果属性是不可配置的，那么不能修改它的可配置性和可枚举性。
+* 如果存取器属性是不可配置的，则不能修改其getter和setter方法，也不能将其转换为数据属性。
+* 如果数据属性是不可配置的，则不能将其转换为存取器属性
+* 如果数据属性是不可配置的，则不能将它的可写性从false转为true，但可以从true转为false。
+* 如果数据属性是不可配置且不可写的，则不能修改它的值。然后可配置但不可写属性的值是可以修改。
+
+extend函数升级版：
+给Object.prototype添加一个不可枚举的extend方法
+
+```javascript
+Object.defineProperty(Object.prototype, 'extend', {
+  writable: true,
+  enumberable: false,
+  configurable: true,
+  value: function(o) {
+    var names = Object.getOwnPropertyNames(o)
+    for (var i = 0; i<names.length; i++) {
+      if (names[i] in this) continue
+      var desc = Object.getOwnPropertyDescriptor(o, names[i])
+      Object.defineProperty(this, names[i], desc)
+    }
+  }
+})
+```
+
+### 原型属性
+
+* 对象直接量创建的对象使用Object.prototype作为它们的原型
+* 通过new创建的对象使用构造函数的prototype属性作为原型
+* Object.create创建的对象以第一个参数作为原型
+
+`isPrototypeOf`检测一个对象是否是另一对象的原型。与instanceof类似。
+
+### 对象序列化  JSON.stringify 和 JSON.parse
+
+* NaN、Infinity、-Infinity序列化后是null
+* 日期对象（Date）序列化结果是ISO格式的日期字符串，JSON.parse()依然保持它们字符串的形态，而不会还原为日期对象。
+* 函数、RegExp、Error对象和undefined值不能序列化和还原。
+* JSON.stringify只能序列化对象可枚举的自有属性，对于不能序列化的属性在序列化后会被省略掉。
