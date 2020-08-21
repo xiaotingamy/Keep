@@ -397,3 +397,58 @@ if (rawModule.modules) { // rawModule.modules ==> {a: {...}, b: {...}}
 
 总结：
 对于 root module 的下一层 modules 来说，它们的 parent 就是 root module，那么他们就会被添加的 root module 的 _children 中。每个子模块通过路径找到它的父模块，然后通过父模块的 addChild 方法建立父子关系，递归执行这样的过程，最终就建立一颗完整的模块树。
+
+### installModule
+
+```javascript
+function installModule (store, rootState, path, module, hot) {
+  const isRoot = !path.length
+  const namespace = store._modules.getNamespace(path) // 生成当前路径（当前模块）的namespace字段：如果是根模块，namespace就是‘’，如果是子模块的就是模块key+'/'，如果'a/'。
+
+  // register in namespace map
+  if (module.namespaced) {
+    if (store._modulesNamespaceMap[namespace] && __DEV__) {
+      console.error(`[vuex] duplicate namespace ${namespace} for the namespaced module ${path.join('/')}`)
+    }
+    store._modulesNamespaceMap[namespace] = module
+  } // 生成一个_modulesNamespaceMap, namespace为key, 对应模块对象为value
+
+  // set state
+  if (!isRoot && !hot) {
+    const parentState = getNestedState(rootState, path.slice(0, -1))  // 获取当前模块的父state对象
+    const moduleName = path[path.length - 1]
+    store._withCommit(() => {
+      if (__DEV__) {
+        if (moduleName in parentState) {
+          console.warn(
+            `[vuex] state field "${moduleName}" was overridden by a module with the same name at "${path.join('.')}"`
+          )
+        }
+      }
+      Vue.set(parentState, moduleName, module.state)
+    })
+  }
+
+  const local = module.context = makeLocalContext(store, namespace, path)  // 构造一个本地上下文环境，返回一个local对象【里面重写了dispatch、commit，代理了getters、state】
+
+  module.forEachMutation((mutation, key) => {
+    const namespacedType = namespace + key
+    registerMutation(store, namespacedType, mutation, local)
+  })
+
+  module.forEachAction((action, key) => {
+    const type = action.root ? key : namespace + key
+    const handler = action.handler || action
+    registerAction(store, type, handler, local)
+  })
+
+  module.forEachGetter((getter, key) => {
+    const namespacedType = namespace + key
+    registerGetter(store, namespacedType, getter, local)
+  })
+
+  module.forEachChild((child, key) => {
+    installModule(store, rootState, path.concat(key), child, hot)
+  })
+}
+```
