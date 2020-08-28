@@ -399,6 +399,8 @@ if (rawModule.modules) { // rawModule.modules ==> {a: {...}, b: {...}}
 对于 root module 的下一层 modules 来说，它们的 parent 就是 root module，那么他们就会被添加的 root module 的 _children 中。每个子模块通过路径找到它的父模块，然后通过父模块的 addChild 方法建立父子关系，递归执行这样的过程，最终就建立一颗完整的模块树。
 
 ### installModule
+作用：遍历module树，给_acitons、_mutations、_wrappedGetters赋值。
+完成了模块下的 state、getters、actions、mutations 的初始化工作，并且通过递归遍历的方式，就完成了所有子模块的安装工作。
 
 ```javascript
 function installModule (store, rootState, path, module, hot) {
@@ -451,4 +453,90 @@ function installModule (store, rootState, path, module, hot) {
     installModule(store, rootState, path.concat(key), child, hot)
   })
 }
+```
+
+```javascript
+function makeLocalContext (store, namespace, path) {
+  const noNamespace = namespace === ''
+
+  const local = {
+    dispatch: noNamespace ? store.dispatch : (_type, _payload, _options) => {
+      const args = unifyObjectStyle(_type, _payload, _options)  // 参数重代，如果第一个参数是对象，那么参数需要移个位置
+      const { payload, options } = args
+      let { type } = args
+
+      if (!options || !options.root) {
+        // 做上下文命名空间的拼接‘a/方法名’ 例：‘a/increment’
+        type = namespace + type
+        if (__DEV__ && !store._actions[type]) {
+          console.error(`[vuex] unknown local action type: ${args.type}, global type: ${type}`)
+          return
+        }
+      }
+
+      return store.dispatch(type, payload)
+    },
+
+    commit: noNamespace ? store.commit : (_type, _payload, _options) => {
+      const args = unifyObjectStyle(_type, _payload, _options)
+      const { payload, options } = args
+      let { type } = args
+
+      if (!options || !options.root) {
+        type = namespace + type
+        if (__DEV__ && !store._mutations[type]) {
+          console.error(`[vuex] unknown local mutation type: ${args.type}, global type: ${type}`)
+          return
+        }
+      }
+
+      store.commit(type, payload, options)
+    }
+  }
+
+  // getters and state object must be gotten lazily
+  // because they will be changed by vm update
+  Object.defineProperties(local, {
+    getters: {
+      get: noNamespace
+        ? () => store.getters
+        : () => makeLocalGetters(store, namespace)
+    },
+    state: {
+      get: () => getNestedState(store.state, path)
+    }
+  })
+
+  return local
+}
+
+function makeLocalGetters (store, namespace) {
+  if (!store._makeLocalGettersCache[namespace]) {
+    const gettersProxy = {}
+    const splitPos = namespace.length
+    Object.keys(store.getters).forEach(type => {
+      // skip if the target getter is not match this namespace
+      if (type.slice(0, splitPos) !== namespace) return
+
+      // extract local getter type
+      const localType = type.slice(splitPos)
+
+      // Add a port to the getters proxy.
+      // Define as getter property because
+      // we do not want to evaluate the getters in this time.
+      Object.defineProperty(gettersProxy, localType, {
+        get: () => store.getters[type],
+        enumerable: true
+      })
+    })
+    store._makeLocalGettersCache[namespace] = gettersProxy
+  }
+
+  return store._makeLocalGettersCache[namespace]
+}
+
+function getNestedState (state, path) {
+  return path.reduce((state, key) => state[key], state)
+}
+
 ```
