@@ -66,7 +66,7 @@ export default function (Vue) {
 
   if (version >= 2) {
     // VUE2.0以上
-    Vue.mixin({ beforeCreate: vuexInit })
+    Vue.mixin({ beforeCreate: vuexInit }) // 全局注册一个混入，影响注册之后所有创建的每个 Vue 实例。也就是所有组件实例都能访问到this.$store的原因。
   } else {
     // override init and inject vuex init procedure
     // for 1.x backwards compatibility.
@@ -97,7 +97,7 @@ export default function (Vue) {
 }
 ```
 
-在beforeCreate钩子函数中混入vuexInit函数，通过vuexInit方法，让每个vue实例都会拥有$store对象。这样，每个组件的beforeCreate的时候都可以拿到store实例。
+这里我们看到使用了`Vue.mixin`全局注册一个混入，影响注册之后所有创建的每个 Vue 实例。这也就是所有组件实例都能访问到this.$store的原因。而从vueInit函数中可以看出this.$store存储了store实例对象。
 
 ## Store的实例化过程
 
@@ -395,7 +395,6 @@ if (rawModule.modules) { // rawModule.modules ==> {a: {...}, b: {...}}
 }
 ```
 
-总结：
 对于 root module 的下一层 modules 来说，它们的 parent 就是 root module，那么他们就会被添加的 root module 的 _children 中。每个子模块通过路径找到它的父模块，然后通过父模块的 addChild 方法建立父子关系，递归执行这样的过程，最终就建立一颗完整的模块树。
 
 ### installModule
@@ -496,6 +495,8 @@ function makeLocalContext (store, namespace, path) {
 
   // getters and state object must be gotten lazily
   // because they will be changed by vm update
+
+  // getters和state需使用代理的方式，因为他们是响应式的
   Object.defineProperties(local, {
     getters: {
       get: noNamespace
@@ -509,17 +510,18 @@ function makeLocalContext (store, namespace, path) {
 
   return local
 }
+// 返回一个local上下文对象，在registerMutation、forEachAction、forEachGetter中需要传入
 
 function makeLocalGetters (store, namespace) {
   if (!store._makeLocalGettersCache[namespace]) {
     const gettersProxy = {}
     const splitPos = namespace.length
-    Object.keys(store.getters).forEach(type => {
+    Object.keys(store.getters).forEach(type => { // 'a/increment'  'a/'是namespace
       // skip if the target getter is not match this namespace
       if (type.slice(0, splitPos) !== namespace) return
 
       // extract local getter type
-      const localType = type.slice(splitPos)
+      const localType = type.slice(splitPos) // 'a/increment' => localType = increment
 
       // Add a port to the getters proxy.
       // Define as getter property because
@@ -531,7 +533,6 @@ function makeLocalGetters (store, namespace) {
     })
     store._makeLocalGettersCache[namespace] = gettersProxy
   }
-
   return store._makeLocalGettersCache[namespace]
 }
 
@@ -540,3 +541,165 @@ function getNestedState (state, path) {
 }
 
 ```
+
+```javascript
+// 往store._mutations添加mutations key是带命名空间的type，value是存放mutation方法的数组
+store._mutations: {
+  'a/increment': [mutation函数, ...],
+  'b/increment': [mutation函数, ...]
+}
+
+function registerMutation (store, type, handler, local) {
+  const entry = store._mutations[type] || (store._mutations[type] = [])
+  entry.push(function wrappedMutationHandler (payload) {
+    handler.call(store, local.state, payload)
+  })
+}
+
+function registerAction (store, type, handler, local) {
+  const entry = store._actions[type] || (store._actions[type] = [])
+  entry.push(function wrappedActionHandler (payload) {
+    let res = handler.call(store, {
+      dispatch: local.dispatch,
+      commit: local.commit,
+      getters: local.getters,
+      state: local.state,
+      rootGetters: store.getters,
+      rootState: store.state
+    }, payload)
+    if (!isPromise(res)) {
+      res = Promise.resolve(res)
+    }
+    if (store._devtoolHook) {
+      return res.catch(err => {
+        store._devtoolHook.emit('vuex:error', err)
+        throw err
+      })
+    } else {
+      return res
+    }
+  })
+}
+
+// 同理给store._wrappedGetters加值
+function registerGetter (store, type, rawGetter, local) {
+  if (store._wrappedGetters[type]) {
+    if (__DEV__) {
+      console.error(`[vuex] duplicate getter key: ${type}`)
+    }
+    return
+  }
+  store._wrappedGetters[type] = function wrappedGetter (store) {
+    return rawGetter(
+      local.state, // local state
+      local.getters, // local getters
+      store.state, // root state
+      store.getters // root getters
+    )
+  }
+}
+```
+
+### resetStoreVM
+
+resetStoreVM(this, state)，初始化store._vm
+建立getters和state之间的联系。getters的获取依赖了state。
+
+```javascript
+function resetStoreVM (store, state, hot) {
+  const oldVm = store._vm
+
+  // bind store public getters
+  store.getters = {}
+  // reset local getters cache
+  store._makeLocalGettersCache = Object.create(null)
+  const wrappedGetters = store._wrappedGetters
+  const computed = {}
+  forEachValue(wrappedGetters, (fn, key) => {
+    // use computed to leverage its lazy-caching mechanism
+    // direct inline function use will lead to closure preserving oldVm.
+    // using partial to return function with only arguments preserved in closure environment.
+    computed[key] = partial(fn, store)   // 相当于 computed[key] = () => fn(store)
+    Object.defineProperty(store.getters, key, {
+      get: () => store._vm[key],
+      enumerable: true // for local getters
+    })
+  })
+
+  // use a Vue instance to store the state tree
+  // suppress warnings just in case the user has added
+  // some funky global mixins
+  const silent = Vue.config.silent
+  Vue.config.silent = true
+  store._vm = new Vue({
+    data: {
+      $$state: state
+    },
+    computed
+  })
+  Vue.config.silent = silent
+
+  // enable strict mode for new vm
+  if (store.strict) {
+    enableStrictMode(store)
+  }
+
+  if (oldVm) {
+    if (hot) {
+      // dispatch changes in all subscribed watchers
+      // to force getter re-evaluation for hot reloading.
+      store._withCommit(() => {
+        oldVm._data.$$state = null
+      })
+    }
+    Vue.nextTick(() => oldVm.$destroy())
+  }
+}
+```
+
+1. 定义computed对象。
+首先遍历_wrappedGetters, 这个对象的key是type，fn就是wrappedGetter函数。`computed[key] = () => fn(store)`执行了fn函数，返回rawGetter函数，也就是用户自定义的getter函数。
+
+```javascript
+store._wrappedGetters[type] = function wrappedGetter (store) {
+  return rawGetter(
+    local.state, // local state
+    local.getters, // local getters
+    store.state, // root state
+    store.getters // root getters
+  )
+}
+```
+
+2.实例化一个Vue实例store._vm，并把`computed`传入
+
+```javascript
+store._vm = new Vue({
+  data: {
+    $$state: state  // 这里的state是rootState
+  },
+  computed  // 上面定义的computed对象，{[type]: rawGetter(...), ...}
+})
+```
+
+Store中访问store.state的时候会执行get state()函数，实际上访问到store._vm._data.$$state
+
+```javascript
+get state () {
+  return this._vm._data.$$state  // store._vm._data.$$state
+}
+```
+
+```javascript
+forEachValue(wrappedGetters, (fn, key) => {
+  computed[key] = partial(fn, store)   // 相当于 computed[key] = () => fn(store)
+  Object.defineProperty(store.getters, key, {
+    get: () => store._vm[key],
+    enumerable: true // for local getters
+  })
+})
+```
+
+我们根据key访问store.getters中的某个getter时，访问到store._vm[key]，也就访问到了computed[key]，然后就会执行rawGetter(local.state,...)也就是用户自定义的getter方法，第一个参数local.state，会访问到getNestedState，那么就会访问到store.state，进而访问到store._vm._data.$$state。这样就建立了一个依赖关系。
+
+如果store.state发生了变化，用户再次访问store.getters中的getter时会重新计算拿到最新的state值。
