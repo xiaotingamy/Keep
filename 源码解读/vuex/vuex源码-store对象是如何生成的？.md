@@ -1,105 +1,33 @@
-# vuex
+# vuex源码解析之store初始化
 
-## vuex和全局对象不同点
+我们知道，vuex是一个专门为vuejs设计的状态管理器。它可以集中存储所有组件的状态，让兄弟组件或多层嵌套组件之间的传值变得简单。vuex以全局单例模式管理着所有组件的状态和一些触发状态变化的行为，本篇从源码上详解vuex是如何设计这个store单例，也就是store类实例化的过程。
 
-* vuex是响应式的。当vue组件从store中读取状态的时候，如果store中的状态发生变化，那么相应组件也会相应的得到更新。（getters）
-* 规则：不能直接改变store中的值，改变store中的值的唯一路径就是mutation。（单向数据流，便于跟踪每个状态的变化）
-
-## vuex安装过程
+下面看一个最简单的例子：
 
 ```javascript
 import Vue from 'vue'
 import Vuex from 'vuex'
+
 Vue.use(Vuex)
-```
 
-Vue.use会执行install方法
-延伸：vue源码中Vue.use的实现：
-
-```javascript
-export function initUse (Vue) {
-  Vue.use = function (plugin) {
-    const installedPlugins = (this._installedPlugins || (this._installedPlugins = []))
-    if (installedPlugins.indexOf(plugin) > -1) {
-      // 插件已被安装
-      return this // 这里的this指向什么？是Vue对象
-    }
-
-    const args = toArray(argumengts, 1) // 参数转为真正的数组
-    args.unshift(this) // Vue对象作为install的第一个参数
-
-    if (typeof plugin.install === 'function') {
-      // 如果插件有install方法则执行install方法
-      plugin.install.apply(plugin, args)
-    } else if (typeof plugin === 'function') {
-      // 如果plugin是函数，直接执行函数
-      plugin.apply(null, args)
-    }
-    installedPlugins.push(plugin)
-    return this // 这里的this指向什么？是Vue对象
-  }
-}
-```
-
-接着看一下Vuex的install方法：
-install方法中，Vue对象作为第一个参数被传入。
-
-```javascript
-let Vue // 这里用了一个全局的Vue去接受Vue对象，不需要单独import Vue
-function install (_Vue) {
-  if (Vue && _Vue === Vue) {
-    if (__DEV__) {
-      console.error('')
-    }
-    return
-  }
-  Vue = _Vue
-  applyMixin(Vue)
-}
-```
-
-applyMixin方法:
-
-```javascript
-export default function (Vue) {
-  const version = Number(Vue.version.split('.')[0])
-
-  if (version >= 2) {
-    // VUE2.0以上
-    Vue.mixin({ beforeCreate: vuexInit }) // 全局注册一个混入，影响注册之后所有创建的每个 Vue 实例。也就是所有组件实例都能访问到this.$store的原因。
-  } else {
-    // override init and inject vuex init procedure
-    // for 1.x backwards compatibility.
-    const _init = Vue.prototype._init
-    Vue.prototype._init = function (options = {}) {
-      options.init = options.init
-        ? [vuexInit].concat(options.init)
-        : vuexInit
-      _init.call(this, options)
+const store = new Vuex.Store({
+  state: {
+    count: 0
+  },
+  mutations: {
+    increment (state) {
+      state.count++
     }
   }
-
-  /**
-   * Vuex init hook, injected into each instances init hooks list.
-   */
-
-  function vuexInit () {
-    const options = this.$options
-    // store injection
-    if (options.store) {
-      this.$store = typeof options.store === 'function'
-        ? options.store()
-        : options.store
-    } else if (options.parent && options.parent.$store) {
-      this.$store = options.parent.$store
-    }
-  }
-}
+})
 ```
 
-这里我们看到使用了`Vue.mixin`全局注册一个混入，影响注册之后所有创建的每个 Vue 实例。这也就是所有组件实例都能访问到this.$store的原因。而从vueInit函数中可以看出this.$store存储了store实例对象。
+它最终形成的初始化的store实例对象如下图：
+![set](./1@2x.png)
 
-## Store的实例化过程
+可以看到形成的store对象中保存了commit、dispatch两个方法和getters、_actions、_mutations、_modules、_modulesNamespaceMap等等属性。下面我们看一下vuex是如何定义这些属性与方法的。
+
+看一下store构造函数，它接收一个对象参数，里面包含actions、getters、state、mutations、modules等Vuex的核心概念。
 
 ```javascript
 export class Store {
@@ -111,11 +39,7 @@ export class Store {
       install(window.Vue)
     }
 
-    if (__DEV__) {
-      assert(Vue, `must call Vue.use(Vuex) before creating a store instance.`)
-      assert(typeof Promise !== 'undefined', `vuex requires a Promise polyfill in this browser.`)
-      assert(this instanceof Store, `store must be called with the new operator.`)
-    }
+    // ...
 
     const {
       plugins = [],
@@ -128,7 +52,7 @@ export class Store {
     this._actionSubscribers = [] // 订阅actions变化的订阅者
     this._mutations = Object.create(null)
     this._wrappedGetters = Object.create(null)
-    this._modules = new ModuleCollection(options) // 初始化modules。构建一个module的树。
+    this._modules = new ModuleCollection(options) // 初始化modules。构建一个modules树。
     this._modulesNamespaceMap = Object.create(null)
     this._subscribers = [] // 订阅mutations变化的订阅者
     this._watcherVM = new Vue()
@@ -148,14 +72,8 @@ export class Store {
     this.strict = strict
 
     const state = this._modules.root.state
-
-    // init root module.
-    // this also recursively registers all sub-modules
-    // and collects all module getters inside this._wrappedGetters
+    // 安装模块
     installModule(this, state, [], this._modules.root)
-
-    // initialize the store vm, which is responsible for the reactivity
-    // (also registers _wrappedGetters as computed properties)
     // getters和state建立依赖关系，变成响应式
     resetStoreVM(this, state)
 
@@ -171,17 +89,15 @@ export class Store {
 }
 ```
 
-以上构造函数逻辑，重点关注到三个点
+以上构造函数逻辑，我们会重点关注到三个点：
 
-1. modules初始化 `this._modules = new ModuleCollection(options)`
-2. installModule `installModule(this, state, [], this._modules.root)`
-3. resetStoreVM `resetStoreVM(this, state)`
+1. `this._modules = new ModuleCollection(options)`：modules初始化模块，形成一棵modules树，最终会存储在图1的_modules属性中.
+2. `installModule(this, state, [], this._modules.root)`：安装模块
+3. resetStoreVM `resetStoreVM(this, state)`：初始化store._vm
 
-### this._modules = new ModuleCollection(options)
+### 初始化模块
 
-通过new ModuleCollection形成一颗模块树：
-
-例子：
+假设我们定义了下面这个store，这个store中包含了一个根模块和两个子模块moduleA和moduleB。
 
 ```javascript
 const moduleA = {
@@ -212,7 +128,7 @@ const store = new Vuex.Store({
 })
 ```
 
-上面例子最终的树形结构是:
+那么通过new ModuleCollection形成的模块树数据结构如下：
 
 ```javascript
 const tree = {
@@ -268,6 +184,11 @@ const tree = {
 }
 ```
 
+vuex中通过构造两个类来形成模块树
+
+* 模块树类`ModuleCollection`【用来组建树形结构的类】
+* 模块类`Module`【用来描述单个模块的类】
+
 看一下ModuleCollection类的实现：
 
 ```javascript
@@ -280,7 +201,7 @@ export default class ModuleCollection {
 }
 ```
 
-1. 构造函数中，注册「根模块」节点。
+第一步，注册根模块节点。
 
 ```javascript
 export default class ModuleCollection {
@@ -295,26 +216,6 @@ export default class ModuleCollection {
     // 创建了一个 Module 的实例
     // Module 是用来描述单个模块的类
     const newModule = new Module(rawModule, runtime)
-    // 根module
-    // {
-    //   runtime: false,
-    //   _children: {}, // 存储子modules
-    //   _rawModule: {
-    //     modules: {
-    //       a: moduleA,
-    //       b: moduleB
-    //     },
-    //     state: {
-    //       kk: 1
-    //     },
-    //     mutations: {...},
-    //     actions: {...},
-    //     getters: {...}
-    //   }, // 根module（root module (Vuex.Store options)）
-    //   state: {
-    //     kk: 1
-    //   } // rawModule.state
-    // }
     if (path.length === 0) {
       // 根模块
       this.root = newModule
@@ -338,17 +239,18 @@ export default class ModuleCollection {
 }
 ```
 
-2. 
-`const parent = this.get(path.slice(0, -1))`
-`parent.addChild(path[path.length - 1], newModule)`
+第二步，如果有子模块，首先根据路径获取到父模块，然后再调用父模块的 addChild 方法建立父子关系。
 
-首先根据路径获取到父模块，然后再调用父模块的 addChild 方法建立父子关系。
+```javascript
+const parent = this.get(path.slice(0, -1))
+parent.addChild(path[path.length - 1], newModule)
+```
+
+* get函数：根据path找到当前模块的父模块。
 
 ```javascript
 export default class ModuleCollection {
-
   ...
-
   get (path) {
     return path.reduce((module, key) => {
       return module.getChild(key)
@@ -358,8 +260,7 @@ export default class ModuleCollection {
 }
 ```
 
-调用父模块的addChild方法。
-定义在单个模块类（module）的addChild方法
+* 调用父模块的addChild方法（定义在单个模块类（module）的addChild方法）
 
 ```javascript
 export default class Module {
@@ -383,9 +284,10 @@ export default class Module {
 
   ...
 }
+
 ```
 
-3. 遍历当前模块定义中的所有modules，根据key作为path，递归调用register方法。
+第三步，遍历当前模块定义中的所有modules，把模块的key作为path，递归调用register方法。
 
 ```javascript
 if (rawModule.modules) { // rawModule.modules ==> {a: {...}, b: {...}}
@@ -396,11 +298,12 @@ if (rawModule.modules) { // rawModule.modules ==> {a: {...}, b: {...}}
 }
 ```
 
-对于 root module 的下一层 modules 来说，它们的 parent 就是 root module，那么他们就会被添加的 root module 的 _children 中。每个子模块通过路径找到它的父模块，然后通过父模块的 addChild 方法建立父子关系，递归执行这样的过程，最终就建立一颗完整的模块树。
+总的来说，对于根模块root module的下一层modules来说，它们的parent就是root module，那么他们就会被添加的root module的 _children中。每个子模块通过路径找到它的父模块，然后通过父模块的addChild方法建立父子关系，递归执行这样的过程，最终就建立一颗完整的模块树。
+那么，我们形成这棵模块树的作用是什么呢？答案是我们要根据模块树来安装模块，在store对象上注册actions,mutations和getters。下面我们就看一下如果安装模块。
 
-### installModule
-作用：遍历module树，给_acitons、_mutations、_wrappedGetters赋值。
-完成了模块下的 state、getters、actions、mutations 的初始化工作，并且通过递归遍历的方式，就完成了所有子模块的安装工作。
+### 安装模块
+
+安装模块也就是函数installModule的执行过程，它将遍历module树，给_acitons、_mutations、_wrappedGetters赋值，完成模块下的state、getters、actions、mutations的初始化工作，并且通过递归遍历的方式，就完成了所有子模块的安装工作。
 
 ```javascript
 function installModule (store, rootState, path, module, hot) {
@@ -455,6 +358,10 @@ function installModule (store, rootState, path, module, hot) {
 }
 ```
 
+#### makeLocalContext
+
+构建一个local上下文对象，在registerMutation、registerAction、registerGetter中需要传入。这里为了保证有命名空间的模块注册时调用其本地上下文环境的dispatch、commit方法和state、getters属性。
+
 ```javascript
 function makeLocalContext (store, namespace, path) {
   const noNamespace = namespace === ''
@@ -494,9 +401,6 @@ function makeLocalContext (store, namespace, path) {
     }
   }
 
-  // getters and state object must be gotten lazily
-  // because they will be changed by vm update
-
   // getters和state需使用代理的方式，因为他们是响应式的
   Object.defineProperties(local, {
     getters: {
@@ -511,22 +415,15 @@ function makeLocalContext (store, namespace, path) {
 
   return local
 }
-// 返回一个local上下文对象，在registerMutation、forEachAction、forEachGetter中需要传入
 
+// 访问当前模块下getters  => store.getters[type]
 function makeLocalGetters (store, namespace) {
   if (!store._makeLocalGettersCache[namespace]) {
     const gettersProxy = {}
     const splitPos = namespace.length
     Object.keys(store.getters).forEach(type => { // 'a/increment'  'a/'是namespace
-      // skip if the target getter is not match this namespace
       if (type.slice(0, splitPos) !== namespace) return
-
-      // extract local getter type
       const localType = type.slice(splitPos) // 'a/increment' => localType = increment
-
-      // Add a port to the getters proxy.
-      // Define as getter property because
-      // we do not want to evaluate the getters in this time.
       Object.defineProperty(gettersProxy, localType, {
         get: () => store.getters[type],
         enumerable: true
@@ -537,74 +434,38 @@ function makeLocalGetters (store, namespace) {
   return store._makeLocalGettersCache[namespace]
 }
 
+// 通过path.reduce方法一层层查找子模块state，最终找到目标模块的state。
 function getNestedState (state, path) {
   return path.reduce((state, key) => state[key], state)
 }
 
 ```
 
-```javascript
-// 往store._mutations添加mutations key是带命名空间的type，value是存放mutation方法的数组
-store._mutations: {
-  'a/increment': [mutation函数, ...],
-  'b/increment': [mutation函数, ...]
-}
+注册mutations、actions、getters，这边只看一下注册mutation的方法，因为注册actions和getters的方法都是类似的。
 
+```javascript
 function registerMutation (store, type, handler, local) {
   const entry = store._mutations[type] || (store._mutations[type] = [])
   entry.push(function wrappedMutationHandler (payload) {
     handler.call(store, local.state, payload)
   })
 }
+```
 
-function registerAction (store, type, handler, local) {
-  const entry = store._actions[type] || (store._actions[type] = [])
-  entry.push(function wrappedActionHandler (payload) {
-    let res = handler.call(store, {
-      dispatch: local.dispatch,
-      commit: local.commit,
-      getters: local.getters,
-      state: local.state,
-      rootGetters: store.getters,
-      rootState: store.state
-    }, payload)
-    if (!isPromise(res)) {
-      res = Promise.resolve(res)
-    }
-    if (store._devtoolHook) {
-      return res.catch(err => {
-        store._devtoolHook.emit('vuex:error', err)
-        throw err
-      })
-    } else {
-      return res
-    }
-  })
-}
+registerMutation往store._mutations添加mutations，key是带命名空间的type，value是存放mutation方法的数组，actions同理。最终的结果示例如下：
 
-// 同理给store._wrappedGetters加值
-function registerGetter (store, type, rawGetter, local) {
-  if (store._wrappedGetters[type]) {
-    if (__DEV__) {
-      console.error(`[vuex] duplicate getter key: ${type}`)
-    }
-    return
-  }
-  store._wrappedGetters[type] = function wrappedGetter (store) {
-    return rawGetter(
-      local.state, // local state
-      local.getters, // local getters
-      store.state, // root state
-      store.getters // root getters
-    )
-  }
+```javascript
+store._mutations: {
+  'a/increment': [mutation函数, ...],
+  'b/increment': [mutation函数, ...]
 }
 ```
 
+installModule执行完毕后，子模块的所有mutations都将挂载在store._mutations上，子模块的所有actions会挂载在store._actions上，子模块的所有getters会挂载在store._wrappedGetters上，并且子模块的所有state会在store._modules.root.state中体现。
+
 ### resetStoreVM
 
-resetStoreVM(this, state)，初始化store._vm
-建立getters和state之间的联系。getters的获取依赖了state。
+resetStoreVM(this, state)，初始化store._vm。它的作用是建立getters和state之间的联系，getters的获取是依赖于state的。
 
 ```javascript
 function resetStoreVM (store, state, hot) {
@@ -617,9 +478,6 @@ function resetStoreVM (store, state, hot) {
   const wrappedGetters = store._wrappedGetters
   const computed = {}
   forEachValue(wrappedGetters, (fn, key) => {
-    // use computed to leverage its lazy-caching mechanism
-    // direct inline function use will lead to closure preserving oldVm.
-    // using partial to return function with only arguments preserved in closure environment.
     computed[key] = partial(fn, store)   // 相当于 computed[key] = () => fn(store)
     Object.defineProperty(store.getters, key, {
       get: () => store._vm[key],
@@ -627,9 +485,6 @@ function resetStoreVM (store, state, hot) {
     })
   })
 
-  // use a Vue instance to store the state tree
-  // suppress warnings just in case the user has added
-  // some funky global mixins
   const silent = Vue.config.silent
   Vue.config.silent = true
   store._vm = new Vue({
@@ -658,7 +513,7 @@ function resetStoreVM (store, state, hot) {
 }
 ```
 
-1. 定义computed对象。
+第一步，定义computed对象。
 首先遍历_wrappedGetters, 这个对象的key是type，fn就是wrappedGetter函数。`computed[key] = () => fn(store)`执行了fn函数，返回rawGetter函数，也就是用户自定义的getter函数。
 
 ```javascript
@@ -672,7 +527,7 @@ store._wrappedGetters[type] = function wrappedGetter (store) {
 }
 ```
 
-2.实例化一个Vue实例store._vm，并把`computed`传入
+第二步，实例化一个Vue实例store._vm，并把`computed`传入。
 
 ```javascript
 store._vm = new Vue({
@@ -702,5 +557,8 @@ forEachValue(wrappedGetters, (fn, key) => {
 ```
 
 我们根据key访问store.getters中的某个getter时，访问到store._vm[key]，也就访问到了computed[key]，然后就会执行rawGetter(local.state,...)也就是用户自定义的getter方法，第一个参数local.state，会访问到getNestedState，那么就会访问到store.state，进而访问到store._vm._data.$$state。这样就建立了一个依赖关系。
-
 如果store.state发生了变化，用户再次访问store.getters中的getter时会重新计算拿到最新的state值。
+
+### 总结
+
+至此，我们回头看一下store的构造函数执行完毕，实例化的过程也分析完了。回顾一下，我们先是初始化了一个模块树，然后根据模块树，实现了各个子模块的state、actions、mutations、getters的递归安装过程，使得store这个全局单例属性中包含了所有子模块的actions、mutations和getters，最终初始化完毕，并建立了getters和state之间的联系。
