@@ -601,7 +601,7 @@ function registerGetter (store, type, rawGetter, local) {
 }
 ```
 
-### resetStoreVM
+### resetStoreVM （数据获取）
 
 resetStoreVM(this, state)，初始化store._vm
 建立getters和state之间的联系。getters的获取依赖了state。
@@ -704,3 +704,128 @@ forEachValue(wrappedGetters, (fn, key) => {
 我们根据key访问store.getters中的某个getter时，访问到store._vm[key]，也就访问到了computed[key]，然后就会执行rawGetter(local.state,...)也就是用户自定义的getter方法，第一个参数local.state，会访问到getNestedState，那么就会访问到store.state，进而访问到store._vm._data.$$state。这样就建立了一个依赖关系。
 
 如果store.state发生了变化，用户再次访问store.getters中的getter时会重新计算拿到最新的state值。
+
+### 数据存储
+
+数据存储实际是对state中数据做操作，通过执行mutations中定义的方法。
+store类中定义了两个方法，commit 和 dispatch
+
+#### commit
+
+首先看下commit的定义：commit方法让我们提交一个mutation
+
+```javascript
+commit (_type, _payload, _options) {
+  // check object-style commit
+  const {
+    type,
+    payload,
+    options
+  } = unifyObjectStyle(_type, _payload, _options)
+
+  const mutation = { type, payload }
+  const entry = this._mutations[type]
+  if (!entry) {
+    if (__DEV__) {
+      console.error(`[vuex] unknown mutation type: ${type}`)
+    }
+    return
+  }
+  // 遍历store._mutations[type]中的方法并执行传入的handler。
+  this._withCommit(() => {
+    entry.forEach(function commitIterator (handler) {
+      handler(payload)
+    })
+  })
+
+  this._subscribers
+    .slice() // shallow copy to prevent iterator invalidation if subscriber synchronously calls unsubscribe
+    .forEach(sub => sub(mutation, this.state))
+
+  if (
+    __DEV__ &&
+    options && options.silent
+  ) {
+    console.warn(
+      `[vuex] mutation type: ${type}. Silent option has been removed. ` +
+      'Use the filter functionality in the vue-devtools'
+    )
+  }
+}
+```
+
+从store._mutations找到对应的函数数组，遍历它们执行获取到每个handler然后执行，实际上就是执行了wrappedMutationHandler(playload)，接着会执行我们定义的mutation函数，并传入当前模块的state。这样就实现了对当前模块的state的修改。
+
+#### dispatch
+
+dispatch的特点：必须返回一个promise
+
+看一下dispatch的定义：
+
+```javascript
+dispatch (_type, _payload) {
+  // check object-style dispatch
+  const {
+    type,
+    payload
+  } = unifyObjectStyle(_type, _payload) // 参数重代
+
+  const action = { type, payload }
+  const entry = this._actions[type]
+  if (!entry) {
+    if (__DEV__) {
+      console.error(`[vuex] unknown action type: ${type}`)
+    }
+    return
+  }
+
+  try {
+    this._actionSubscribers
+      .slice() // shallow copy to prevent iterator invalidation if subscriber synchronously calls unsubscribe
+      .filter(sub => sub.before)
+      .forEach(sub => sub.before(action, this.state))
+  } catch (e) {
+    if (__DEV__) {
+      console.warn(`[vuex] error in before action subscribers: `)
+      console.error(e)
+    }
+  }
+
+  const result = entry.length > 1
+    ? Promise.all(entry.map(handler => handler(payload))) // 这里说明了要dispatch的函数必须返回promise
+    : entry[0](payload)
+
+  return new Promise((resolve, reject) => {
+    result.then(res => {
+      try {
+        this._actionSubscribers
+          .filter(sub => sub.after)
+          .forEach(sub => sub.after(action, this.state))
+      } catch (e) {
+        if (__DEV__) {
+          console.warn(`[vuex] error in after action subscribers: `)
+          console.error(e)
+        }
+      }
+      resolve(res)
+    }, error => {
+      try {
+        this._actionSubscribers
+          .filter(sub => sub.error)
+          .forEach(sub => sub.error(action, this.state, error))
+      } catch (e) {
+        if (__DEV__) {
+          console.warn(`[vuex] error in error action subscribers: `)
+          console.error(e)
+        }
+      }
+      reject(error)
+    })
+  })
+}
+```
+
+从store._actions找到对应的函数数组，遍历它们执行获取到每个handler然后执行，执行wrappedActionHandler(payload)，接着会执行我们定义的action函数，并传入一个对象。传入对象包含了当前模块下的 dispatch、commit、getters、state，以及全局的state和getters，所以我们定义的action函数能拿到当前模块下的commit方法。
+
+这里注意，在我们注册模块时的makeLocalContext方法保证了不同的模块都调用其自身模块下的mutations或actions方法。
+
