@@ -500,3 +500,234 @@ return new Function("return scope");
 }
 constructFunction()(); // => "global
 ```
+
+检测一个对象是否是真正的函数对象
+
+```javascript
+function isFunction(x) {
+  return Object.prototype.toString.call(x) === "[object Function]";
+}
+```
+
+## 函数式编程
+
+### 使用函数处理数组
+
+使用函数处理数组——计算平均值和标准差。
+
+```javascript
+var sum = function(x,y) { return x+y; };
+var square = function(x) { return x*x; };
+var data = [1,1,3,5,5];
+var mean = data.reduce(sum)/data.length;
+var deviations = data.map(function(x) {return x-mean;});
+var stddev = Math.sqrt(deviations.map(square).reduce(sum)/(data.length-1));
+```
+
+自定义的map和reduce函数
+
+```javascript
+var map = Array.prototype.map
+? function(a, f) { return a.map(f); }
+: function(a, f) {
+  var results = [];
+  for(var i = 0, len = a.length; i < len; i++) {
+    if (i in a) results[i] = f.call(null, a[i], i, a);
+  }
+  return results;
+};
+
+var reduce = Array.prototype.reduce
+? function(a, f, initial) {
+    if (arguments.length > 2)
+      return a.reduce(f, initial);
+    else 
+      return a.reduce(f);
+  }
+  : function(a, f, initial) {
+      var i = 0, len = a.length, accumulator;
+      if (arguments.length > 2) accumulator = initial;
+      else { 
+        if (len == 0) throw TypeError();
+        while(i < len) {
+          if (i in a) {
+            accumulator = a[i++];
+            break;
+          }
+          else i++;
+        }
+        if (i == len) throw TypeError();
+      }
+      while(i < len) {
+        if (i in a)
+          accumulator = f.call(undefined, accumulator, a[i], i, a);
+        i++;
+      }
+      return accumulator;
+    }
+```
+
+使用自定义的map和reduce函数
+
+```javascript
+var data = [1,1,3,5,5];
+var sum = function(x,y) { return x+y; };
+var square = function(x) { return x*x; };
+var mean = reduce(data, sum)/data.length;
+var deviations = map(data, function(x) {return x-mean;});
+var stddev = Math.sqrt(reduce(map(deviations, square), sum)/(data.length-1));
+```
+
+### 高阶函数
+
+操作函数的函数，接收一个或多个函数作为参数，返回一个新的函数
+
+```javascript
+//not()函数时一个高阶函数
+function not(f) {
+  return function() {
+    var result = f.apply(this, arguments);
+    return !result;
+  };
+}
+var even = function(x) {
+  return x % 2 === 0;
+};
+var odd = not(even);
+[1,1,3,5,5].every(odd); // => true: 每个元素都是奇数
+```
+
+```javascript
+function mapper(f) {
+  return function(a) { return map(a, f); };
+}
+var increment = function(x) { return x+1; };
+var incrementer = mapper(increment);
+incrementer([1,2,3]) // => [2,3,4]
+```
+
+```javascript
+function compose(f, g) {
+  return function() {
+    return f.call(this, g.apply(this, arguments));
+  };
+}
+var square = function(x) { return x*x; };
+var sum = function(x,y) { return x+y; };
+var squareofsum = compose(square, sum);
+squareofsum(2,3) // => 25
+```
+
+### 不完全函数
+
+把一次完整的函数调用拆成多次函数调用，每次传入的实参都是完整实参的一部分，每次拆分开的函数叫做不完全函数，每次函数调用叫做不完全调用
+
+```javascript
+//将类数组对象转换为真正的数组
+function array(a, n) { return Array.prototype.slice.call(a, n || 0); }
+
+//这个函数的实参传递至左侧
+function partialLeft(f /*, ...*/) {
+  var args = arguments; // 保存外部的实参数组
+  return function() {
+    var a = array(args, 1);
+    a = a.concat(array(arguments));
+    return f.apply(this, a);
+  };
+}
+
+//这个函数的实参传递至右侧
+function partialRight(f /*, ...*/) {
+  var args = arguments;
+  return function() {
+    var a = array(arguments);
+    a = a.concat(array(args,1));
+    return f.apply(this, a);
+  };
+}
+
+//这个函数的实参被用作模板
+//实参列表中的undefined值都被填充
+function partial(f /*, ... */) {
+  var args = arguments;
+  return function() {
+    var a = array(args, 1);
+    var i=0, j=0;
+    for(; i < a.length; i++)
+      if (a[i] === undefined) a[i] = arguments[j++];
+      a = a.concat(array(arguments, j))
+    return f.apply(this, a);
+  };
+}
+```
+
+利用已有函数来定义新的函数：
+
+```javascript
+var increment = partialLeft(sum, 1);
+var cuberoot = partialRight(Math.pow, 1/3);
+String.prototype.first = partial(String.prototype.charAt, 0);
+String.prototype.last = partial(String.prototype.substr, -1, 1)
+```
+
+当将不完全调用和其他高阶函数整合在一起
+
+```javascript
+var not = partialLeft(compose, function(x) { return !x; });
+var even = function(x) { return x % 2 === 0; };
+var odd = not(even);
+var isNumber = not(isNaN)
+```
+
+使用不完全调用的组合来重新组织求平均数和标准差的代码——函数式编程
+
+```javascript
+var data = [1,1,3,5,5]; // Our data
+var sum = function(x,y) { return x+y; };
+var product = function(x,y) { return x*y; };
+var neg = partial(product, -1); // 定义其他函数
+var square = partial(Math.pow, undefined, 2);
+var sqrt = partial(Math.pow, undefined, .5);
+var reciprocal = partial(Math.pow, undefined, -1);
+// 计算平均值和标准差，所有的函数调用都不带运算符
+
+var mean = product(reduce(data, sum), reciprocal(data.length));
+var stddev = sqrt(product(reduce(map(data,
+                                    compose(square,
+                                      partial(sum, neg(mean)))),
+                            sum),
+                      reciprocal(sum(data.length,-1))));
+```
+
+### 记忆
+
+将上次的计算结果缓存起来，在函数式编程中，这种缓存技巧叫做“记忆”。
+
+```javascript
+function memoize(f) {
+  var cache = {};
+  return function() {
+    var key = arguments.length + Array.prototype.join.call(arguments,",");
+    if (key in cache) return cache[key];
+    else return cache[key] = f.apply(this, arguments);
+  };
+}
+```
+
+memoize函数创建一个新的对象，这个对象被当作缓存的宿主并赋值给一个局部变量，所有对于返回的函数来说他是私有的（在闭包中）。所返回的函数将他的实参数组转换为字符串，并将字符串用作缓存对象的属性名，如果缓存仲有这个值，那么直接返回它。
+
+```javascript
+//欧几里得算法-求两个整数的最大公约数
+function gcd(a,b) {
+  var t;
+  if (a < b) t=b, b=a, a=t;
+  while(b != 0) t=b, b = a%b, a=t;
+  return a;
+}
+var gcdmemo = memoize(gcd);
+gcdmemo(85, 187) // => 17
+var factorial = memoize(function(n) {
+  return (n <= 1) ? 1 : n * factorial(n-1);
+});
+factorial(5) // => 120.
+```
