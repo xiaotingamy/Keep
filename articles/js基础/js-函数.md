@@ -717,6 +717,14 @@ function memoize(f) {
 memoize函数创建一个新的对象，这个对象被当作缓存的宿主并赋值给一个局部变量，所有对于返回的函数来说他是私有的（在闭包中）。所返回的函数将他的实参数组转换为字符串，并将字符串用作缓存对象的属性名，如果缓存仲有这个值，那么直接返回它。
 
 ```javascript
+function memoize(f) {
+  var cache = {};
+  return function() {
+    var key = arguments.length + Array.prototype.join.call(arguments,",");
+    if (key in cache) return cache[key];
+    else return cache[key] = f.apply(this, arguments);
+  };
+}
 //欧几里得算法-求两个整数的最大公约数
 function gcd(a,b) {
   var t;
