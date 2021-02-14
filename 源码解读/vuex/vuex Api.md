@@ -227,6 +227,9 @@ this._modules = {
     mutations: {
       increment (state) {
         state.count++
+      },
+      incrementBy (state, amount) {
+        state.count += amount
       }
     },
     actions: {
@@ -280,7 +283,8 @@ const store = {
     'a/moveY': [f],
     'a/moveX': [f],
     'a/increment': [f],
-    'increment': [f]
+    'increment': [f],
+    'incrementBy': [f]
   },
   _wrappedGetters: {
     'a/doubleCount': function wrappedGetter (store) {},
@@ -324,6 +328,7 @@ const store = {
     'moveY': [f],
     'moveX': [f],
     'increment': [f, f, f]
+    'incrementBy': [f]
   },
   _wrappedGetters: {
     'sumWithRootCount': function wrappedGetter (store) {},
@@ -408,7 +413,8 @@ const store = {
     'a/moveY': [f],
     'a/moveX': [f],
     'a/increment': [f],
-    'increment': [f]
+    'increment': [f],
+    'incrementBy': [f]
   },
   _wrappedGetters: {
     'a/doubleCount': function wrappedGetter (store) {},
